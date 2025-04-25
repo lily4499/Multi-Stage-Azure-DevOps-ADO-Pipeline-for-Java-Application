@@ -320,7 +320,6 @@ az aks get-credentials --resource-group java-aks-rg --name javaAksCluster
 ```
 ---
 
-
 5. Service Connection in ADO:
   -  Azure Resource Manager for App Service
   -  Kubernetes Service Connection for AKS
@@ -405,69 +404,106 @@ curl -X POST "$ORG_URL/$PROJECT_NAME/_apis/serviceendpoint/endpoints?api-version
 ## 🧱 Step-by-Step Pipeline Breakdown
 
 ### 🧩 Stage 1: Code Validation
+This stage checks that your Java code compiles successfully and meets basic structure rules.  
+It uses Maven's clean compile to:
+ - Remove old build files (clean)
+ - Compile your .java source files into .class bytecode (compile)
+✅ Outcome:  
+Confirms that the code is valid and ready for testing.  
+Fails early if there's a syntax error or missing dependencies.  
+
 
 ```yaml
-stages:
-- stage: Build
-  displayName: "Build & Validate"
-  jobs:
-  - job: MavenBuild
+stages:  # Define the stages of the pipeline
+- stage: Build  # First stage named 'Build'
+  displayName: "Build & Validate"  # Friendly name shown in the Azure DevOps UI
+  jobs:  # This stage contains one or more jobs
+  - job: MavenBuild  # Define a job named 'MavenBuild'
     pool:
-      vmImage: 'ubuntu-latest'
-    steps:
-    - task: Maven@3
+      vmImage: 'ubuntu-latest'  # Use a Microsoft-hosted Ubuntu VM for this job
+    steps:  # List of steps to run in the job
+    - task: Maven@3  # Run the built-in Maven task (version 3)
       inputs:
-        mavenPomFile: 'pom.xml'
-        goals: 'clean compile'
-        mavenOptions: '-Xmx1024m'
+        mavenPomFile: 'pom.xml'  # Location of the Maven project descriptor file
+        goals: 'clean compile'  # Run two Maven goals:
+                                # - clean: delete old build files
+                                # - compile: compile Java source code
+        mavenOptions: '-Xmx1024m'  # Set JVM max heap size to 1024 MB during the build
+
 ```
 
 ---
 
 ### 🧪 Stage 2: Integration Testing
+This stage runs automated tests (usually unit or integration tests).
+Uses Maven's verify goal to:
+ - Compile the code
+ - Run test suites (like those written in JUnit)
+ - Check that all tests pass
+✅ Outcome:
+ - Confirms that your app behaves as expected
+ - Prevents broken code from moving to production
+
 
 ```yaml
-- stage: Test
+- stage: Test     # Stage to run integration or unit tests
   displayName: "Integration Tests"
-  dependsOn: Build
+  dependsOn: Build     # Only runs if the Build stage is successful
   jobs:
   - job: RunTests
     pool:
       vmImage: 'ubuntu-latest'
     steps:
-    - task: Maven@3
+    - task: Maven@3     # Use Maven again to run tests
       inputs:
         mavenPomFile: 'pom.xml'
-        goals: 'verify'
+        goals: 'verify'      # Runs compile, tests, and verifies build integrity
 ```
 
 ---
 
 ### 🚀 Stage 3: Deploy to Azure App Service
+ - Deploys your packaged .war (or .jar) file to a staging App Service.
+ - Uses the AzureWebApp@1 task in ADO
+ - Runs only after tests pass
+✅ Outcome:
+ - Your application is hosted in a testable web environment
+ - Teams can manually verify features before approving production
+📝 You can also set up environment approvals here before this deploys.
+
 
 ```yaml
 - stage: DeployAppService
   displayName: "Deploy to Azure App Service"
   dependsOn: Test
-  condition: succeeded()
+  condition: succeeded()      # Ensures only successful pipelines reach here
   jobs:
-  - deployment: DeployWeb
-    environment: 'staging'  # Use approvals in ADO environment settings
+  - deployment: DeployWeb      # Special job type for deployment
+    environment: 'staging'  # Use approvals in ADO environment settings; ADO environment that can have approvals & checks
     strategy:
       runOnce:
         deploy:
           steps:
-          - task: AzureWebApp@1
+          - task: AzureWebApp@1       # Built-in task to deploy to Azure App Service
             inputs:
-              azureSubscription: 'MyAzureServiceConnection'
-              appType: 'webApp'
+              azureSubscription: 'MyAzureServiceConnection'      # ADO service connection to Azure
+              appType: 'webApp'      # Specifies that this is a standard Web App
               appName: 'my-java-app'
-              package: '$(System.DefaultWorkingDirectory)/**/*.war'
+              package: '$(System.DefaultWorkingDirectory)/**/*.war'      # WAR file to deploy
 ```
 
 ---
 
 ### ☸️ Optional: Deploy to AKS
+
+ - Deploys your Dockerized Java application to a Kubernetes cluster
+ - Uses a Kubernetes manifest (deployment.yaml)
+ - Typically done for microservice-based or containerized apps  
+✅ Outcome:  
+ - Your app is live on Kubernetes (usually in production)
+ - You can scale, monitor, and manage it via AKS and kubectl  
+📝 This stage is often gated behind manual approval or automated quality gates.
+
 
 ```yaml
 - stage: DeployAKS
@@ -475,25 +511,31 @@ stages:
   dependsOn: Test
   condition: succeeded()
   jobs:
-  - deployment: DeployToK8s
-    environment: 'production'  # Add manual approval in Azure DevOps UI
+  - deployment: DeployToK8s    # Kubernetes deployment job
+    environment: 'production'  # Add manual approval in Azure DevOps UI;  Separate environment for AKS (can have approval)
     strategy:
       runOnce:
         deploy:
           steps:
-          - task: Kubernetes@1
+          - task: Kubernetes@1       # Built-in task to apply Kubernetes manifests
             inputs:
-              connectionType: 'Kubernetes Service Connection'
-              kubernetesServiceEndpoint: 'MyK8sConnection'
+              connectionType: 'Kubernetes Service Connection'     # Use pre-created AKS connection
+              kubernetesServiceEndpoint: 'MyK8sConnection'      # Name of service connection
               namespace: 'default'
-              command: 'apply'
-              useConfigurationFile: true
-              configuration: 'manifests/deployment.yaml'
+              command: 'apply'      # Run `kubectl apply`
+              useConfigurationFile: true       # Use local YAML file for deployment
+              configuration: 'manifests/deployment.yaml'      # Path to the Kubernetes manifest
 ```
 
 ---
 
 ## 🔐 Set Up Approvals
+
+ - Prevents accidental deployments to critical environments like production
+ - Adds a manual checkpoint for QA, management, or security
+✅ Outcome:  
+ - Human-in-the-loop confirmation before the app goes live
+ - Better control over deployments and rollback
 
 - Go to **Pipelines > Environments**
 - Select `staging` and `production`
